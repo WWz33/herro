@@ -139,21 +139,19 @@ jobs:
         run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost && df -h .
 
       - name: Install Apptainer
-        run: |
-          sudo apt-get update -qq
-          sudo apt-get install -y -qq curl
-          curl -s https://packagecloud.io/install/repositories/apptainer/stable/script.deb.sh | sudo bash
-          sudo apt-get install -y -qq apptainer
-          apptainer --version
+        uses: eWaterCycle/setup-apptainer@v3
+        with:
+          apptainer-version: latest
+      - name: Check Apptainer
+        run: apptainer --version
 
-      - name: Build SIF from Docker image
+      - name: Build SIF from GHCR image
+        env:
+          APPTAINER_DOCKER_USERNAME: ${{ github.actor }}
+          APPTAINER_DOCKER_PASSWORD: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # 从 GHCR 拉刚构建的镜像，转成 .sif，复用二进制与 libtorch
-          docker login ghcr.io -u ${{ github.actor }} --password-stdin \
-            <<< "${{ secrets.GITHUB_TOKEN }}"
-          docker pull ${{ env.IMAGE_NAME }}:latest
-          docker save ${{ env.IMAGE_NAME }}:latest -o /tmp/herro-docker.tar
-          apptainer build herro.sif docker-archive:///tmp/herro-docker.tar
+          # 直接复用已推送的 GHCR 镜像，无需重复下载 libtorch / 编译。
+          apptainer build herro.sif docker://${{ env.IMAGE_NAME }}:latest
           ls -lh herro.sif
 
       - name: Upload SIF to Release
