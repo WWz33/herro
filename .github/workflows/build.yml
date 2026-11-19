@@ -20,7 +20,8 @@ permissions:
   packages: write
 
 env:
-  IMAGE_NAME: ghcr.io/${{ github.repository }}
+  # GHCR 镜像名必须全小写；github.repository 含大写用户名，故统一转小写。
+  IMAGE_NAME: ghcr.io/wwz33/herro
 
 jobs:
   # ---------- 1. Linux amd64 二进制 ----------
