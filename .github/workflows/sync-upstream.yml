@@ -1,0 +1,78 @@
+name: Sync upstream herro
+
+# 定时同步 lbcb-sci/herro 的源码改动到本仓库，源码有更新则触发构建。
+on:
+  schedule:
+    - cron: "17 3 * * *"   # 每天 UTC 03:17
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Record current upstream sha
+        id: before
+        run: |
+          if [ -f .github/upstream-sha ]; then
+            echo "sha=$(cat .github/upstream-sha)" >> "$GITHUB_OUTPUT"
+          else
+            echo "sha=" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream https://github.com/lbcb-sci/herro.git
+          git fetch --depth=1 upstream main
+
+      - name: Compare
+        id: diff
+        run: |
+          UP=$(git rev-parse upstream/main)
+          OLD="${{ steps.before.outputs.sha }}"
+          echo "upstream=$UP"
+          echo "recorded=$OLD"
+          if [ "$UP" = "$OLD" ]; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+            echo "up=$UP" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Sync source files
+        if: steps.diff.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          UP="${{ steps.diff.outputs.up }}"
+
+          # 只同步上游源码白名单；保留本仓库自己的 .github / model / 构建脚本 / .gitignore / README / Dockerfile / def。
+          git archive upstream/main src Cargo.toml scripts resources demo LICENSE.txt \
+            | tar -x -C .
+
+          echo "$UP" > .github/upstream-sha
+
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No source content changed (only sha record)."
+          else
+            git commit -m "sync: lbcb-sci/herro@${UP:0:12}"
+            git push
+            echo "Source updated, triggering build."
+          fi
+
+          # GITHUB_TOKEN 的 push 不会自动触发其它 workflow，显式触发构建。
+          gh workflow run build.yml \
+            -f reason="upstream-sync" \
+            -f upstream_sha="$UP"

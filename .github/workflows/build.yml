@@ -1,0 +1,152 @@
+name: Build herro (binary / Docker / Singularity)
+
+on:
+  workflow_dispatch:
+    inputs:
+      reason:
+        description: "Trigger reason"
+        required: false
+        default: "manual"
+      upstream_sha:
+        description: "Upstream sha (informational)"
+        required: false
+        default: ""
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
+
+jobs:
+  # ---------- 1. Linux amd64 二进制 ----------
+  binary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /opt/hostedtoolcache
+          df -h .
+
+      - name: Build herro inside CUDA devel container
+        run: |
+          docker run --rm -v "$PWD":/work -w /work \
+            -e LIBTORCH=/opt/libtorch \
+            nvidia/cuda:12.4.1-devel-ubuntu22.04 \
+            bash -lc '
+              set -euo pipefail
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq
+              apt-get install -y -qq wget unzip curl build-essential zlib1g-dev zstd git >/dev/null
+              # libtorch 2.4.0+cu124
+              wget -q -O /tmp/lt.zip "https://download.pytorch.org/libtorch/cu124/libtorch-cxx11-abi-shared-with-deps-2.4.0%2Bcu124.zip"
+              unzip -q /tmp/lt.zip -d /opt && rm /tmp/lt.zip
+              test -f /opt/libtorch/include/torch/torch.h
+              # NVRTC builtins: 文件名缺版本后缀，补一个 SONAME 软链
+              ln -sf libnvrtc-builtins.so /opt/libtorch/lib/libnvrtc-builtins.so.12.4
+              # rust
+              curl --proto "=https" --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y >/dev/null
+              . "$HOME/.cargo/env"
+              # minimap2
+              git clone -q --depth=1 https://github.com/lh3/minimap2.git /tmp/minimap2
+              make -C /tmp/minimap2 -j2 >/dev/null
+              cp /tmp/minimap2/minimap2 /work/herro-bin-dir-minimap2 2>/dev/null || true
+              mkdir -p /work/dist
+              RUSTFLAGS="-Ctarget-cpu=native -C link-arg=-Wl,-rpath,/opt/libtorch/lib" \
+                LIBTORCH=/opt/libtorch cargo build --release
+              cp target/release/herro /work/dist/herro-linux-amd64
+              cp /tmp/minimap2/minimap2 /work/dist/minimap2
+              ldd /work/dist/herro-linux-amd64 | grep -E "c10|torch" | head
+            '
+
+      - name: Package
+        run: |
+          mkdir -p package
+          cp dist/herro-linux-amd64 package/herro
+          cp dist/minimap2 package/minimap2
+          cp model_R10_v0.1.pt package/
+          cd package && tar -czf ../herro-linux-amd64.tar.gz . && cd ..
+          ls -lh herro-linux-amd64.tar.gz
+
+      - name: Upload to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'latest' }}
+          files: |
+            herro-linux-amd64.tar.gz
+            model_R10_v0.1.pt
+          generate_release_notes: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ---------- 2. Docker -> GHCR ----------
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE_NAME }}
+          tags: |
+            type=raw,value=latest
+            type=ref,event=tag
+
+      - name: Build and push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+
+  # ---------- 3. Singularity .sif -> Release ----------
+  singularity:
+    runs-on: ubuntu-latest
+    needs: docker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost && df -h .
+
+      - name: Install Apptainer
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y -qq curl
+          curl -s https://packagecloud.io/install/repositories/apptainer/stable/script.deb.sh | sudo bash
+          sudo apt-get install -y -qq apptainer
+          apptainer --version
+
+      - name: Build SIF from Docker image
+        run: |
+          # 从 GHCR 拉刚构建的镜像，转成 .sif，复用二进制与 libtorch
+          docker login ghcr.io -u ${{ github.actor }} --password-stdin \
+            <<< "${{ secrets.GITHUB_TOKEN }}"
+          docker pull ${{ env.IMAGE_NAME }}:latest
+          docker save ${{ env.IMAGE_NAME }}:latest -o /tmp/herro-docker.tar
+          apptainer build herro.sif docker-archive:///tmp/herro-docker.tar
+          ls -lh herro.sif
+
+      - name: Upload SIF to Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'latest' }}
+          files: herro.sif
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

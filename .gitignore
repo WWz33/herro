@@ -1,0 +1,8 @@
+/target
+/data
+/dist
+/package
+*.tar.gz
+*.sif
+herro
+minimap2
