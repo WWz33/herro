@@ -40,7 +40,7 @@ jobs:
           OLD="${{ steps.before.outputs.sha }}"
           echo "upstream=$UP"
           echo "recorded=$OLD"
-          if [ "$UP" = "$OLD" ]; then
+          if [ "$UP" = "$OLD" ] && [ "${{ github.event_name }}" != "workflow_dispatch" ]; then
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             echo "changed=true" >> "$GITHUB_OUTPUT"
@@ -74,5 +74,6 @@ jobs:
 
           # GITHUB_TOKEN 的 push 不会自动触发其它 workflow，显式触发构建。
           gh workflow run build.yml \
+            --repo "${{ github.repository }}" \
             -f reason="upstream-sync" \
             -f upstream_sha="$UP"
