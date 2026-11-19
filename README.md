@@ -8,14 +8,21 @@
 2. 为每次源码变更构建并发布：
    - **Linux amd64 二进制**（含 minimap2、模型 `model_R10_v0.1.pt`）→ GitHub Releases
    - **Docker 镜像** → `ghcr.io/wwz33/herro`
-   - **Singularity/Apptainer `.sif`** → GitHub Releases
+   - **Singularity/Apptainer `.sif`** → GHCR（OCI artifact，因超过 Release 2GB 限制）
 
 模型文件 `model_R10_v0.1.pt`（R10.4.1）随仓库分发，并打包进每个 Release。
 
 ## 产物
 
-- Docker: `docker pull ghcr.io/wwz33/herro:latest`
-- 二进制 / `.sif` / 模型: <https://github.com/WWz33/herro/releases>
+- Docker 镜像: `docker pull ghcr.io/wwz33/herro:latest`
+- Linux amd64 二进制 + 模型: <https://github.com/WWz33/herro/releases>
+- Singularity `.sif`（约 5GB，超过 Release 单文件 2GB 限制，以 OCI artifact 存在 GHCR）:
+  ```shell
+  # 方式一：直接从镜像生成 SIF
+  apptainer pull herro.sif docker://ghcr.io/wwz33/herro:latest
+  # 方式二：下载已构建好的 SIF artifact（需 oras）
+  oras pull ghcr.io/wwz33/herro-sif:latest
+  ```
 
 ## 构建说明
 

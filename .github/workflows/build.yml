@@ -163,10 +163,14 @@ jobs:
           apptainer build herro.sif docker://${{ env.IMAGE_NAME }}:latest
           ls -lh herro.sif
 
-      - name: Upload SIF to Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: ${{ github.ref_type == 'tag' && github.ref_name || 'latest' }}
-          files: herro.sif
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # SIF 含 4.2GB libtorch，超过 GitHub Release 单文件 2GB 上限，
+      # 故用 ORAS 作为 OCI artifact 推送到 GHCR（ghcr.io/wwz33/herro-sif:latest）。
+      - name: Setup ORAS
+        uses: oras-project/setup-oras@v2
+      - name: Push SIF to GHCR as OCI artifact
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | oras login ghcr.io \
+            -u "${{ github.actor }}" --password-stdin
+          oras push ghcr.io/wwz33/herro-sif:latest \
+            herro.sif:application/vnd.sylabs.sif.layer.v1.sif
+          echo "SIF 已推送: ghcr.io/wwz33/herro-sif:latest"
