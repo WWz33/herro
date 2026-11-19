@@ -5,7 +5,7 @@ FROM nvidia/cuda:12.4.1-cudnn-devel-ubuntu22.04 AS devel
 
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update -qq && apt-get install -y -qq \
-      wget git unzip curl build-essential pkg-config zlib1g-dev zstd ca-certificates \
+      wget curl git build-essential pkg-config zlib1g-dev zstd ca-certificates libarchive-tools \
     && rm -rf /var/lib/apt/lists/*
 
 # minimap2
@@ -17,10 +17,10 @@ RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y
 ENV PATH="/root/.cargo/bin:${PATH}"
 
 # libtorch 2.4.0+cu124 (matches tch 0.17.0 / herro v0.1.1)
-RUN wget -q -O /tmp/libtorch.zip \
+# 流式解压：zip 不落盘，避免 2.5GB zip + 4.2GB 解压同时占用导致磁盘耗尽。
+RUN curl -fL --retry 3 \
       "https://download.pytorch.org/libtorch/cu124/libtorch-cxx11-abi-shared-with-deps-2.4.0%2Bcu124.zip" \
-    && unzip -q /tmp/libtorch.zip -d / \
-    && rm /tmp/libtorch.zip \
+    | bsdtar -xf - -C / \
     && test -f /libtorch/include/torch/torch.h
 
 # NVRTC dlopens this by SONAME; the archive ships it without the version suffix.

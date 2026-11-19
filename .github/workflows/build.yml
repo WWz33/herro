@@ -31,7 +31,10 @@ jobs:
 
       - name: Free disk space
         run: |
-          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost /opt/hostedtoolcache
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost \
+            /opt/hostedtoolcache /usr/local/lib/android /usr/share/swift \
+            /usr/lib/jvm /usr/local/share/powershell
+          sudo docker system prune -af || true
           df -h .
 
       - name: Build herro inside CUDA devel container
@@ -43,10 +46,11 @@ jobs:
               set -euo pipefail
               export DEBIAN_FRONTEND=noninteractive
               apt-get update -qq
-              apt-get install -y -qq wget unzip curl build-essential zlib1g-dev zstd git >/dev/null
-              # libtorch 2.4.0+cu124
-              wget -q -O /tmp/lt.zip "https://download.pytorch.org/libtorch/cu124/libtorch-cxx11-abi-shared-with-deps-2.4.0%2Bcu124.zip"
-              unzip -q /tmp/lt.zip -d /opt && rm /tmp/lt.zip
+              apt-get install -y -qq curl build-essential zlib1g-dev zstd git libarchive-tools >/dev/null
+              # libtorch 2.4.0+cu124 —— 流式解压，zip 不落盘
+              curl -fL --retry 3 \
+                "https://download.pytorch.org/libtorch/cu124/libtorch-cxx11-abi-shared-with-deps-2.4.0%2Bcu124.zip" \
+                | bsdtar -xf - -C /opt
               test -f /opt/libtorch/include/torch/torch.h
               # NVRTC builtins: 文件名缺版本后缀，补一个 SONAME 软链
               ln -sf libnvrtc-builtins.so /opt/libtorch/lib/libnvrtc-builtins.so.12.4
@@ -90,6 +94,15 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+
+      - name: Free disk space
+        run: |
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/share/boost \
+            /opt/hostedtoolcache /usr/local/lib/android /usr/share/swift \
+            /usr/lib/jvm /usr/local/share/powershell
+          sudo docker system prune -af || true
+          df -h .
+
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
